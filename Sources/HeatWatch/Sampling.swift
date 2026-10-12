@@ -123,7 +123,8 @@ final class Sampler {
         if connection == nil { connection = hw_open() }
         let sensors = catalog.compactMap { key, name, group -> SensorReading? in
             let value = key.withCString { hw_sensor(connection, $0) }
-            guard value.isFinite, value > 0, value < 150 else { return nil }
+            // Idle GPU sensors report placeholders such as 0.8. A running chip cannot read below 10 °C.
+            guard value.isFinite, value >= 10, value < 150 else { return nil }
             return SensorReading(key: key, name: name, group: group, value: value)
         }
         let cpuValues = sensors.filter { $0.group == "CPU" }.map(\.value)

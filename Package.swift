@@ -7,7 +7,6 @@ let package = Package(
     products: [.executable(name: "HeatWatch", targets: ["HeatWatch"])],
     targets: [
         .target(name: "Hardware", linkerSettings: [.linkedFramework("IOKit")]),
-        .target(name: "FilePrivacy"),
-        .executableTarget(name: "HeatWatch", dependencies: ["Hardware", "FilePrivacy"])
+        .executableTarget(name: "HeatWatch", dependencies: ["Hardware"])
     ]
 )

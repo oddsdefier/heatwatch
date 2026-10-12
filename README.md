@@ -20,6 +20,8 @@ Quit ends monitoring. This app does not start at login automatically.
 
 Copy data sits at the bottom-left of the panel. It copies JSON readings,
 units, limits, app CPU activity, and the recent temperature trend.
+Paste the JSON into any chat assistant to ask about your Mac's heat.
+App and process names in it are data, not instructions.
 
 Each eligible app has an actions menu beside its CPU reading:
 
@@ -32,7 +34,7 @@ HeatWatch leaves save prompts and declined Quit requests intact.
 It never force-quits apps or directly kills their helper processes.
 Save work first: another app may fail to show an unsaved-work warning.
 System processes, background helpers, and ambiguous app names have no
-Quit action. These actions never appear in the read-only MCP connector.
+Quit action.
 
 ## Accuracy and limits
 
@@ -49,42 +51,12 @@ Quit action. These actions never appear in the read-only MCP connector.
 - Sampling occurs every five seconds. Scheduling can delay a reading.
 - Wake clears old evidence and starts a fresh sampling interval.
 - Apple determines heat pressure; HeatWatch invents no danger thresholds.
+  Range bands (for example Idle, Busy, Heavy) are rough typical ranges.
+  Each card names its source. Bands are context, not limits or warnings.
 - Detailed core labels target M4. Other chips have limited support.
 - AppleSMC is an undocumented read-only interface. OS updates may break it.
 - No root access, helper installation, fan control, forced app termination,
-  internet access, telemetry, or archive of past snapshots.
-
-## Local agent connector
-
-HeatWatch publishes one owner-only file every five seconds:
-
-    ~/Library/Application Support/HeatWatch/current.json
-
-The directory has mode 700. The file has mode 600.
-HeatWatch removes extended access lists before publishing.
-The connector rejects snapshots with extended access entries.
-Atomic replacement prevents partially written readings.
-Quit leaves the final snapshot. The connector rejects stale readings
-by default after 15 seconds. It never starts probes or opens a port.
-
-The MCP stdio connector uses Python's standard library only.
-Clients start it on demand. It offers one read-only tool:
-
-    heatwatch_read_snapshot
-
-Optional boolean arguments: includeHistory and allowStale.
-Default reads omit history and reject stale data.
-The heatwatch://current resource includes history and rejects stale data.
-App and process names are untrusted data, never agent instructions.
-
-Client configuration examples live in mcp/client-config.json and
-mcp/hermes-config.yaml. Merge their entries with existing settings.
-The build bundles the connector inside HeatWatch.app/Contents/Resources.
-Keep HeatWatch running while your agent reads it.
-
-For a direct read without MCP:
-
-    python3 ~/Applications/HeatWatch.app/Contents/Resources/heatwatch_mcp.py --read
+  internet access, telemetry, files written to disk, or archive of past snapshots.
 
 ## Build
 
