@@ -1,0 +1,38 @@
+# Swift build output and local workspace state
+.build/
+.swiftpm/
+DerivedData/
+build/
+dist/
+*.app/
+*.dSYM/
+xcuserdata/
+*.xcuserstate
+
+# Python bytecode, virtual environments, and tool caches
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local settings, secrets, and runtime output
+.env
+.env.*
+!.env.example
+.idea/
+*.log
+logs/
+snapshots/
+
+# macOS metadata and editor temporary files
+.DS_Store
+.AppleDouble
+._*
+*.swp
+*.swo
+*~
