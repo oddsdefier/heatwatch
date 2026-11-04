@@ -15,11 +15,10 @@ typedef struct {
     int32_t pid;
     uint64_t birth;
     uint64_t cpu_ns;
-    char name[128];
-    char path[1024];
 } HWProcess;
-/* Caller frees the returned array with hw_free_processes. */
+/* Counters only. Caller frees the returned array with hw_free_processes. */
 int hw_processes(HWProcess **output);
-void hw_process_path(HWProcess *process);
+/* Writes the executable path. Returns 0 and an empty string on failure. */
+int hw_process_path(int32_t pid, char *buffer, uint32_t size);
 void hw_free_processes(HWProcess *processes);
 #endif

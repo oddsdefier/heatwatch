@@ -17,7 +17,14 @@ typedef struct {
     uint8_t result, status, command; uint32_t index; uint8_t bytes[32];
 } Message;
 _Static_assert(sizeof(Message) == 80, "Invalid SMC protocol layout");
-struct HWConnection { io_connect_t port; };
+/* Key types never change, so each key needs one info call per connection. */
+enum { InfoCacheSize = 64 };
+struct HWConnection {
+    io_connect_t port;
+    int cached;
+    uint32_t keys[InfoCacheSize];
+    KeyInfo infos[InfoCacheSize];
+};
 
 static uint32_t fourcc(const char *s) {
     return ((uint32_t)(uint8_t)s[0] << 24) | ((uint32_t)(uint8_t)s[1] << 16)
@@ -56,9 +63,19 @@ void hw_close(HWConnection *c) {
 double hw_sensor(HWConnection *c, const char *key) {
     if (!c || !key || strlen(key) != 4) return NAN;
     Message in = {.key = fourcc(key), .command = 9}, out;
-    if (!call(c, &in, &out)) return NAN;
-    KeyInfo info = out.info;
-    if (info.size > 32 || info.size == 0) return NAN;
+    KeyInfo info = {0};
+    int found = 0;
+    for (int i = 0; i < c->cached; i++)
+        if (c->keys[i] == in.key) { info = c->infos[i]; found = 1; break; }
+    if (!found) {
+        if (!call(c, &in, &out)) return NAN;
+        info = out.info;
+        if (info.size > 32 || info.size == 0) return NAN;
+        if (c->cached < InfoCacheSize) {
+            c->keys[c->cached] = in.key;
+            c->infos[c->cached++] = info;
+        }
+    }
     in.info = info;
     in.command = 5;
     if (!call(c, &in, &out)) return NAN;
@@ -122,16 +139,16 @@ int hw_processes(HWProcess **output) {
         /* rusage CPU counters use Mach ticks, not nanoseconds, on Apple Silicon. */
         item->cpu_ns = (uint64_t)(((__uint128_t)usage.ri_user_time + usage.ri_system_time)
                                  * timebase.numer / timebase.denom);
-        hw_process_path(item);
     }
     free(pids);
     *output = items;
     return used;
 }
-void hw_process_path(HWProcess *item) {
-    memset(item->path, 0, sizeof(item->path));
-    if (proc_pidpath(item->pid, item->path, sizeof(item->path)) <= 0)
-        item->path[0] = 0;
-    item->path[sizeof(item->path) - 1] = 0;
+int hw_process_path(int32_t pid, char *buffer, uint32_t size) {
+    if (!buffer || size == 0) return 0;
+    int length = proc_pidpath(pid, buffer, size);
+    if (length <= 0 || (uint32_t)length >= size) { buffer[0] = 0; return 0; }
+    buffer[length] = 0;
+    return length;
 }
 void hw_free_processes(HWProcess *items) { free(items); }

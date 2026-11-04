@@ -2,57 +2,6 @@ import Foundation
 import Darwin
 import Hardware
 
-struct SensorReading: Codable, Identifiable, Sendable {
-    let key: String
-    let name: String
-    let group: String
-    let value: Double
-    var id: String { key }
-}
-
-struct Contributor: Codable, Identifiable, Sendable {
-    let id: String
-    let name: String
-    let cpu: Double
-    let averageCPU: Double
-    let processCount: Int
-    var applicationPaths: [String] = []
-
-    // Paths identify UI actions only; exported data does not need them.
-    private enum CodingKeys: String, CodingKey {
-        case id, name, cpu, averageCPU, processCount
-    }
-}
-
-struct ProcessReading: Codable, Identifiable, Sendable {
-    let pid: Int32
-    let name: String
-    let app: String
-    let cpu: Double
-    var id: Int32 { pid }
-}
-
-struct Snapshot: Codable, Sendable {
-    let date: Date
-    let chip: String
-    let sensors: [SensorReading]
-    let cpuTemperature: Double?
-    let cpuPeak: Double?
-    let gpuTemperature: Double?
-    let batteryTemperature: Double?
-    let fanRPM: Double?
-    let gpuUsage: Double?
-    let charging: Bool?
-    let thermalState: String
-    let contributors: [Contributor]
-    let processes: [ProcessReading]
-    let observedProcesses: Int
-    let sampleSeconds: Double
-    let evidenceSeconds: Double
-    let explanation: String
-    let notice: String?
-}
-
 struct ProcessCounter {
     let identity: String
     let pid: Int32
@@ -76,6 +25,13 @@ actor SamplingWorker {
     }
 }
 
+/// Names derived from an executable path. A live process keeps its path, so each resolves once.
+private struct ProcessIdentity {
+    let name: String
+    let app: String
+    let applicationPath: String?
+}
+
 private struct ProcessInterval {
     let seconds: Double
     let cpuSeconds: [String: Double]
@@ -87,6 +43,8 @@ final class Sampler {
     private var previous: [String: ProcessCounter] = [:]
     private var previousTime: Double?
     private var intervals: [ProcessInterval] = []
+    private var identities: [String: ProcessIdentity] = [:]
+    private var seenIdentities: [String: ProcessIdentity] = [:]
     private let chip: String
     private let catalog: [(String, String, String)]
 
@@ -114,6 +72,7 @@ final class Sampler {
         previous.removeAll()
         previousTime = nil
         intervals.removeAll()
+        identities.removeAll()
         hw_close(connection)
         connection = hw_open()
     }
@@ -197,8 +156,8 @@ final class Sampler {
         else if !chip.contains("Apple M4") { notice = "Limited sensor support on this chip." }
         else { notice = nil }
         return Snapshot(date: sensorDate, chip: chip, sensors: sensors,
-                        cpuTemperature: Self.mean(cpuValues), cpuPeak: cpuValues.max(),
-                        gpuTemperature: Self.mean(gpuValues),
+                        cpuTemperature: SamplingRules.mean(cpuValues), cpuPeak: cpuValues.max(),
+                        gpuTemperature: SamplingRules.mean(gpuValues),
                         batteryTemperature: sensors.first { $0.group == "Battery" }?.value,
                         fanRPM: fan.isFinite && fan >= 0 && fan <= 20000 ? fan : nil,
                         gpuUsage: gpu.isFinite ? gpu : nil,
@@ -208,7 +167,7 @@ final class Sampler {
                         observedProcesses: counters?.count ?? 0,
                         sampleSeconds: validInterval ? elapsed : 0,
                         evidenceSeconds: evidenceSeconds,
-                        explanation: Self.explain(contributors, evidenceSeconds: evidenceSeconds,
+                        explanation: SamplingRules.explain(contributors, evidenceSeconds: evidenceSeconds,
                                                   gpuUsage: gpu.isFinite ? gpu : nil,
                                                   charging: chargingValue == 1,
                                                   processesAvailable: counters != nil,
@@ -216,16 +175,36 @@ final class Sampler {
     }
 
     private func readProcesses() -> (counters: [ProcessCounter]?, complete: Bool) {
+        seenIdentities.removeAll(keepingCapacity: true)
+        // Keep only processes seen in this sample. Exited processes leave the cache.
+        defer { swap(&identities, &seenIdentities) }
         let native = nativeProcesses()
-        let fallback = systemProcesses()
+        let fallback = systemProcesses(excluding: Set((native ?? []).map(\.pid)))
         guard native != nil || fallback != nil else { return (nil, false) }
-        let nativePIDs = Set((native ?? []).map(\.pid))
-        return ((native ?? []) + (fallback ?? []).filter { !nativePIDs.contains($0.pid) }, fallback != nil)
+        return ((native ?? []) + (fallback ?? []), fallback != nil)
+    }
+
+    private func identity(_ key: String, pid: Int32) -> ProcessIdentity {
+        if let known = identities[key] ?? seenIdentities[key] {
+            seenIdentities[key] = known
+            return known
+        }
+        var buffer = [CChar](repeating: 0, count: 4096)
+        hw_process_path(pid, &buffer, UInt32(buffer.count))
+        let path = String(cString: buffer)
+        // String parts avoid the file system lookup that URL(fileURLWithPath:) makes.
+        let parts = path.split(separator: "/")
+        let name = pid == 0 ? "kernel_task" : parts.last.map(String.init) ?? "Process \(pid)"
+        let app = parts.first { $0.hasSuffix(".app") }.map { String($0.dropLast(4)) } ?? name
+        let resolved = ProcessIdentity(name: name, app: app, applicationPath: SamplingRules.applicationPath(for: path))
+        // An empty path can be a transient failure. Retry it next sample.
+        if !path.isEmpty || pid == 0 { seenIdentities[key] = resolved }
+        return resolved
     }
 
     // ps exposes CPU time for system processes that deny proc_pid_rusage.
     // Request only numeric counters and start dates. Never request process titles.
-    private func systemProcesses() -> [ProcessCounter]? {
+    private func systemProcesses(excluding nativePIDs: Set<Int32>) -> [ProcessCounter]? {
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/bin/ps")
         task.arguments = ["-axo", "pid=,time=,lstart="]
@@ -264,41 +243,14 @@ final class Sampler {
         }
         return String(decoding: data, as: UTF8.self).split(separator: "\n").compactMap { line in
             let fields = line.split(whereSeparator: { $0.isWhitespace })
-            guard fields.count == 7, let pid = Int32(fields[0]), let cpuNS = Self.cpuTime(String(fields[1])) else { return nil }
-            var metadata = HWProcess()
-            metadata.pid = pid
-            hw_process_path(&metadata)
-            let path = withUnsafeBytes(of: &metadata.path) {
-                String(cString: $0.baseAddress!.assumingMemoryBound(to: CChar.self))
-            }
-            let executable = URL(fileURLWithPath: path).lastPathComponent
-            let name = pid == 0 ? "kernel_task" : (path.isEmpty ? "Process \(pid)" : executable)
-            let app = path.split(separator: "/").first { $0.hasSuffix(".app") }
-                .map { String($0.dropLast(4)) } ?? name
-            let birth = fields[2...6].joined(separator: " ")
-            return ProcessCounter(identity: "ps:\(pid):\(birth)", pid: pid, name: name,
-                                  app: app, cpuNS: cpuNS, bornUptime: nil,
-                                  applicationPath: Self.applicationPath(for: path))
+            guard fields.count == 7, let pid = Int32(fields[0]), !nativePIDs.contains(pid),
+                  let cpuNS = SamplingRules.cpuTime(String(fields[1])) else { return nil }
+            let key = "ps:\(pid):\(fields[2...6].joined(separator: " "))"
+            let known = identity(key, pid: pid)
+            return ProcessCounter(identity: key, pid: pid, name: known.name,
+                                  app: known.app, cpuNS: cpuNS, bornUptime: nil,
+                                  applicationPath: known.applicationPath)
         }
-    }
-
-    private static func cpuTime(_ value: String) -> UInt64? {
-        let dayParts = value.split(separator: "-", maxSplits: 1)
-        var seconds: Double = 0
-        if dayParts.count == 2 {
-            guard let days = Double(dayParts[0]), days >= 0 else { return nil }
-            seconds = days * 86400
-        }
-        let parts = dayParts.last!.split(separator: ":")
-        guard parts.count >= 2, parts.count <= 3 else { return nil }
-        var factor: Double = 1
-        for part in parts.reversed() {
-            guard let number = Double(part), number >= 0 else { return nil }
-            seconds += number * factor
-            factor *= 60
-        }
-        guard seconds.isFinite, seconds < Double(UInt64.max) / 1_000_000_000 else { return nil }
-        return UInt64(seconds * 1_000_000_000)
     }
 
     private func nativeProcesses() -> [ProcessCounter]? {
@@ -307,57 +259,14 @@ final class Sampler {
         guard count >= 0, let pointer else { return nil }
         defer { hw_free_processes(pointer) }
         return (0..<Int(count)).map { index in
-            var entry = pointer[index]
-            let path = withUnsafeBytes(of: &entry.path) {
-                String(cString: $0.baseAddress!.assumingMemoryBound(to: CChar.self))
-            }
-            let executableName = URL(fileURLWithPath: path).lastPathComponent
-            let processName = path.isEmpty ? "Process \(entry.pid)" : executableName
-            let app = path.split(separator: "/").first { $0.hasSuffix(".app") }
-                .map { String($0.dropLast(4)) } ?? processName
-            return ProcessCounter(identity: "\(entry.pid):\(entry.birth)", pid: entry.pid,
-                                  name: processName, app: app, cpuNS: entry.cpu_ns,
+            let entry = pointer[index]
+            let key = "\(entry.pid):\(entry.birth)"
+            let known = identity(key, pid: entry.pid)
+            return ProcessCounter(identity: key, pid: entry.pid,
+                                  name: known.name, app: known.app, cpuNS: entry.cpu_ns,
                                   bornUptime: Double(entry.birth) / 1_000_000_000,
-                                  applicationPath: Self.applicationPath(for: path))
+                                  applicationPath: known.applicationPath)
         }
-    }
-
-    private static func applicationPath(for executable: String) -> String? {
-        guard executable.hasPrefix("/") else { return nil }
-        let parts = executable.split(separator: "/")
-        guard let index = parts.firstIndex(where: { $0.hasSuffix(".app") }) else { return nil }
-        return "/" + parts[...index].joined(separator: "/")
-    }
-
-    private static func mean(_ values: [Double]) -> Double? {
-        values.isEmpty ? nil : values.reduce(0, +) / Double(values.count)
-    }
-
-    private static func explain(_ apps: [Contributor], evidenceSeconds: Double,
-                                gpuUsage: Double?, charging: Bool, processesAvailable: Bool,
-                                completeCoverage: Bool) -> String {
-        guard processesAvailable else { return "Cannot identify likely sources without process readings." }
-        guard evidenceSeconds >= 14.5 else { return "Collecting sustained CPU activity. Wait about 15 seconds." }
-        var parts: [String] = []
-        let active = apps.filter { $0.averageCPU >= 20 && $0.name != "kernel_task" }.prefix(2)
-        if !active.isEmpty {
-            parts.append("Likely CPU contributors: " + active.map {
-                "\($0.name) (\(Int($0.averageCPU.rounded()))% average)"
-            }.joined(separator: ", ") + ".")
-        }
-        if let gpuUsage, gpuUsage >= 30 {
-            parts.append("Graphics activity is high. This reading cannot identify its app.")
-        }
-        if charging { parts.append("Battery charging may also add heat.") }
-        if parts.isEmpty {
-            parts.append(completeCoverage
-                         ? "No sustained high CPU use in sampled processes. Brief tasks, graphics, airflow, or residual heat may contribute."
-                         : "No sustained high CPU use in readable processes. Unread processes may add heat.")
-        }
-        if apps.contains(where: { $0.name == "kernel_task" && $0.averageCPU >= 20 }) {
-            parts.append("kernel_task may reflect heat management, not the cause.")
-        }
-        return parts.joined(separator: " ")
     }
 
     private static func cpuBrand() -> String {

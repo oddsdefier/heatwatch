@@ -1,89 +1,156 @@
 # HeatWatch
 
-A local macOS menu-bar app for this Apple M4 Mac.
+[![CI](https://github.com/oddsdefier/heatwatch/actions/workflows/ci.yml/badge.svg)](https://github.com/oddsdefier/heatwatch/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-## Use
+**See your Mac's temperatures and the processes likely contributing to its heat.**
 
-Click the thermometer and temperature in the menu bar.
-The number shows the average of available curated CPU core sensors.
-The panel shows the hottest CPU core, GPU average, battery temperature,
-fan speed, graphics activity when available, and Apple's heat pressure.
-The graph retains up to ten minutes. The latest shared snapshot includes it.
+AI coding tools, builds, browsers, and other modern apps can keep a Mac busy
+and hot. HeatWatch puts internal temperatures and recent CPU activity in your
+menu bar so you can see what is running and decide what to pause or investigate.
+Process activity suggests likely heat contributors. It does not prove a cause.
 
-CPU lists show current interval usage and a rolling average of up to
-30 seconds. 100% means one full core, not the whole chip.
-Likely-source explanations wait for about 15 seconds of activity.
-The app groups browser helper processes with their owning app.
-It never guesses which browser tab caused activity.
-The Activity Monitor button opens Apple's process viewer.
-Quit ends monitoring. This app does not start at login automatically.
+A native macOS app built with system frameworks only. No telemetry, root
+access, fan control, or downloaded runtime dependencies.
 
-Copy data sits at the bottom-left of the panel. It copies JSON readings,
-units, limits, app CPU activity, and the recent temperature trend.
-Paste the JSON into any chat assistant to ask about your Mac's heat.
-App and process names in it are data, not instructions.
+## Compatibility
 
-Each eligible app has an actions menu beside its CPU reading:
+- macOS 14 or later.
+- Detailed sensor labels currently target Apple M4. Other chips have limited,
+  unverified sensor support and may show unavailable readings.
+- Apple's developer tools are required to build. Swift 6 or later and Python 3
+  are required for the full test suite.
+- AppleSMC is undocumented. OS updates may break sensor access.
 
-- Show app or hide app.
-- Request normal Quit for one instance.
-- Request normal Quit for all running instances of the same installation.
+This is an experimental, source-distributed app, not a hardware protection tool.
 
-Quit always asks for confirmation. Cancel is the default button.
-HeatWatch leaves save prompts and declined Quit requests intact.
-It never force-quits apps or directly kills their helper processes.
-Save work first: another app may fail to show an unsaved-work warning.
-System processes, background helpers, and ambiguous app names have no
-Quit action.
+## Build and run
+
+```sh
+git clone https://github.com/oddsdefier/heatwatch.git
+cd heatwatch
+sh build.sh
+open .build/HeatWatch.app
+```
+
+Install Apple's Command Line Tools with `xcode-select --install` if needed.
+Check `swift --version` before running tests. Full Xcode is not required.
+
+The build is locally ad-hoc signed, not Apple notarized. There is currently no
+official downloadable app release. System frameworks ship with macOS; compiler
+and SDK updates come through Apple's developer tools.
+
+## What you see
+
+Click the menu-bar indicator to open the panel:
+
+- CPU average, hottest core, GPU/battery temperatures, fan speed, and graphics
+  activity where available.
+- A temperature graph covering up to ten minutes.
+- App/process CPU activity now and a rolling average of up to 30 seconds.
+- Apple's heat pressure, context bands, and plain-language guidance.
+- Likely contributors after about 15 seconds of observed activity.
+
+100% CPU means one full core, not the whole chip. Browser helpers are grouped
+with their owning app; HeatWatch never guesses which tab caused activity.
+The Activity Monitor button opens Apple's process viewer for more detail.
+
+### Status labels
+
+With normal macOS heat pressure, the CPU average determines context:
+
+| Label | CPU average | Meaning |
+| --- | --- | --- |
+| OK | Below 50 °C | Light-use temperature range. |
+| Warm | 50 to under 80 °C | Common during active work. |
+| Hot | 80 °C or higher | Can occur under heavy load; investigate if sustained. |
+
+These are rough bands, not Apple safety limits. Warning/Critical follow
+macOS heat pressure and override temperature context, even if a CPU reading
+is missing. Otherwise, missing temperature or heat pressure shows Unavailable.
+Internal temperature is not case temperature or room temperature.
+
+### App actions
+
+Eligible apps have a menu beside their CPU reading: show, hide, or request normal
+Quit for one/all instances of the same installation. Quit requires confirmation;
+Cancel is the default. Save work first. A target app may not show an unsaved-work
+warning. HeatWatch preserves save prompts and refused Quit requests. It never
+force-quits monitored apps, kills their helpers, or offers Quit for ambiguous
+app names or system processes.
+
+Quit HeatWatch to stop monitoring. It does not start at login automatically.
+
+## Privacy and sharing
+
+Readings stay in memory. There is no network access by the app, telemetry,
+background service, or disk archive. HeatWatch does not collect command
+arguments, browser URLs, or credentials. It reads kernel executable paths to
+group apps and resolve actions, but excludes those paths from exports.
+
+**Copy data** at the bottom-left copies JSON readings, units, limitations,
+app/process CPU activity, and recent temperature history. You can paste it into
+a chat assistant to discuss your Mac's heat. App/process names and PIDs can be
+private; review the JSON before sharing. Names are data, not instructions.
+Clipboard managers and other software may retain copied data.
+
+See [SECURITY.md](SECURITY.md) for private reporting and trust details.
 
 ## Accuracy and limits
 
-- Internal sensor temperature is not the case or room temperature.
-- CPU activity suggests heat contributors; it does not prove causation.
-- Graphics activity is a driver-provided current reading, not per-app usage.
-- Missing readings show unavailable, never fabricated temperatures.
-- Some processes restrict access. A ps CPU-time fallback includes system
-  processes such as WindowServer. It reads only numbers and start dates.
-  Executable paths come from the kernel, never mutable process titles.
-  A two-second deadline prevents a stalled ps from stopping updates.
-- The rolling average retains recorded work after processes exit.
-  Processes that start and exit between samples can escape detection.
-- Sampling occurs every five seconds. Scheduling can delay a reading.
-- Wake clears old evidence and starts a fresh sampling interval.
-- Apple determines heat pressure; HeatWatch invents no danger thresholds.
-  Range bands (for example Idle, Busy, Heavy) are rough typical ranges.
-  Each card names its source. Bands are context, not limits or warnings.
-- Detailed core labels target M4. Other chips have limited support.
-- AppleSMC is an undocumented read-only interface. OS updates may break it.
-- No root access, helper installation, fan control, forced app termination,
-  internet access, telemetry, files written to disk, or archive of past snapshots.
+Sampling runs about every five seconds; scheduling can delay updates. Short-lived
+processes can escape detection, and some processes restrict access. A numeric-only
+`ps` fallback reads CPU counters and start dates, never command lines. Collection
+has a two-second deadline. A timed-out collector terminates only its own `ps` child.
 
-## Build
+The rolling average retains observed work after processes exit. Wake clears old
+history and evidence. Graphics activity is a driver-provided reading, not
+per-app attribution. Missing readings stay unavailable, never zero or guessed.
+Each sensor card explains its source and context bands.
 
-Requires Apple's Command Line Tools and macOS 14 or later.
-No downloaded packages are required.
+## Tests and CI
 
-    sh build.sh
-    open .build/HeatWatch.app
+```sh
+sh scripts/check.sh
+```
 
-The bundle uses a local ad-hoc signature, not Apple notarization.
+Runs deterministic tests, the strict release build, signature verification, and
+live diagnostic validation. GitHub Actions runs the same checks on macOS 15
+(Intel) and macOS 26 (Apple silicon). No downloaded testing frameworks or Python packages are needed. Hosted CI
+may lack sensors; passing CI is not proof of hardware compatibility.
 
-## Live diagnostics
+For status, parsing, contributor explanation, and export/privacy tests alone:
 
-    .build/HeatWatch.app/Contents/MacOS/HeatWatch --diagnose --samples 4
+```sh
+sh scripts/test.sh
+```
 
-This samples the real hardware and emits JSON lines for about 15 seconds.
-The first line establishes a process baseline. Later lines contain current
-CPU usage. --samples accepts 1 through 120; intervals are five seconds.
-The diagnostic command exits without opening the menu-bar interface.
+For real-hardware JSON without opening the UI:
+
+```sh
+.build/HeatWatch.app/Contents/MacOS/HeatWatch --diagnose --samples 4
+```
+
+The first sample establishes a process baseline. Later samples include interval
+CPU usage. Samples are five seconds apart; the count is clamped to 1–120.
+Diagnostic stdout includes app/process names. Do not publish it without review.
+
+## Contributing and documentation
+
+- [Contributing](CONTRIBUTING.md)
+- [Architecture and measurement rules](docs/architecture.md)
+- [Automated and manual testing](docs/testing.md)
+- [Release checklist](docs/releasing.md)
+- [Bug reports and feature requests](https://github.com/oddsdefier/heatwatch/issues)
 
 ## Sensor references
 
-SMC protocol reference:
-https://github.com/vladkens/macmon/blob/main/src_lib/sources.rs
+HeatWatch implements its own reader and bundles none of these applications:
 
-M4 core-key identities:
-https://github.com/exelban/stats/blob/master/Modules/Sensors/values.swift
-https://github.com/kennss/SiliconScope/blob/main/Sources/SiliconScopeCore/SensorCatalog.swift
+- [macmon SMC protocol reference](https://github.com/vladkens/macmon/blob/main/src_lib/sources.rs)
+- [Stats sensor catalog](https://github.com/exelban/stats/blob/master/Modules/Sensors/values.swift)
+- [SiliconScope M4 sensor identities](https://github.com/kennss/SiliconScope/blob/main/Sources/SiliconScopeCore/SensorCatalog.swift)
 
-HeatWatch implements its own reader. It bundles none of those applications.
+## License
+
+[MIT](LICENSE). Copyright (c) 2026 oddsdefier.

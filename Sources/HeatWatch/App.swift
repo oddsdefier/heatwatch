@@ -2,13 +2,6 @@ import AppKit
 import SwiftUI
 import Charts
 
-struct HistoryPoint: Identifiable, Encodable, Sendable {
-    let date: Date
-    let cpu: Double?
-    let gpu: Double?
-    var id: Date { date }
-}
-
 enum CopyState {
     case idle, copied, failed
     var symbol: String {
@@ -108,13 +101,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         popover.behavior = .transient
         popover.contentViewController = NSHostingController(rootView: Dashboard(monitor: monitor))
         monitor.onUpdate = { [weak self] snapshot in
-            self?.updateStatusSymbol(snapshot?.thermalState)
-            self?.statusItem.button?.title = snapshot?.cpuTemperature.map {
-                " \(Int($0.rounded()))°C"
-            } ?? " —°C"
-            self?.statusItem.button?.toolTip = snapshot.map {
-                "CPU average · \($0.chip) · \($0.thermalState)"
-            } ?? "HeatWatch · reading sensors"
+            guard let self else { return }
+            guard let snapshot else {
+                self.updateStatusSymbol(nil)
+                self.statusItem.button?.title = " —°C"
+                self.statusItem.button?.toolTip = "HeatWatch · reading sensors"
+                return
+            }
+            let status = HeatStatus.evaluate(cpuTemperature: snapshot.cpuTemperature,
+                                             thermalState: snapshot.thermalState)
+            self.updateStatusSymbol(status)
+            let temperature = snapshot.cpuTemperature.map { "\(Int($0.rounded()))°C" } ?? "—°C"
+            self.statusItem.button?.title = " \(temperature) · \(status.rawValue)"
+            self.statusItem.button?.toolTip = "CPU average · \(snapshot.chip)\n\(status.guidance)"
         }
         monitor.start()
         if CommandLine.arguments.contains("--show") {
@@ -122,18 +121,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// Symbol and tint follow Apple heat pressure only.
-    private func updateStatusSymbol(_ state: String?) {
+    /// Warning tints follow Apple heat pressure, not temperature bands.
+    private func updateStatusSymbol(_ status: HeatStatus?) {
         guard let button = statusItem.button else { return }
-        let symbol: String
-        switch state {
-        case "Warm", "High", "Critical": symbol = "thermometer.high"
-        default: symbol = "thermometer.medium"
-        }
-        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: "HeatWatch")
-        switch state {
-        case "High": button.contentTintColor = .systemOrange
-        case "Critical": button.contentTintColor = .systemRed
+        button.image = NSImage(systemSymbolName: status?.symbol ?? "thermometer.medium",
+                               accessibilityDescription: "HeatWatch")
+        switch status {
+        case .warning: button.contentTintColor = .systemOrange
+        case .critical: button.contentTintColor = .systemRed
         default: button.contentTintColor = nil
         }
     }

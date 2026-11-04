@@ -1,0 +1,35 @@
+name: Bug report
+description: Report incorrect readings, a crash, or unexpected behavior.
+title: "Bug: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not post credentials, command arguments, browser URLs, or unreviewed diagnostic JSON.
+        JSON includes app/process names. Report security issues privately; see SECURITY.md.
+  - type: input
+    id: environment
+    attributes:
+      label: Mac and software
+      description: Chip/model, macOS version, and HeatWatch version or commit.
+      placeholder: Apple M4, macOS 15.x, commit abc1234
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: What happened?
+      description: Include what you expected and any unavailable-reading notices.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Optional evidence
+      description: Reviewed screenshots or redacted diagnostic excerpts. Raw process names may be private.

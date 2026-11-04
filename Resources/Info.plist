@@ -12,5 +12,5 @@
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>LSUIElement</key><true/>
     <key>NSHighResolutionCapable</key><true/>
-    <key>NSHumanReadableCopyright</key><string>Local HeatWatch application</string>
+    <key>NSHumanReadableCopyright</key><string>Copyright (c) 2026 oddsdefier. MIT License.</string>
 </dict></plist>

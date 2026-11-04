@@ -98,6 +98,18 @@ struct Dashboard: View {
             heroNumbers(snapshot)
             RangeBar(scale: .cpu, value: snapshot.cpuTemperature, labeled: true, thickness: 6)
                 .explainer(Explain.cpu(chip: snapshot.chip, value: snapshot.cpuTemperature))
+            let status = HeatStatus.evaluate(cpuTemperature: snapshot.cpuTemperature,
+                                             thermalState: snapshot.thermalState)
+            VStack(alignment: .leading, spacing: 4) {
+                Label(status.rawValue, systemImage: status.symbol)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(statusColor(status))
+                Text(status.guidance)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .accessibilityElement(children: .combine)
         }
     }
 
@@ -111,11 +123,7 @@ struct Dashboard: View {
                 } else {
                     Text("Unavailable").font(.title2.weight(.semibold)).foregroundStyle(.secondary)
                 }
-                HStack(spacing: 6) {
-                    Text("CPU average").foregroundStyle(.secondary)
-                    if let cpu = snapshot.cpuTemperature { BandChip(scale: .cpu, value: cpu) }
-                }
-                .font(.caption)
+                Text("CPU average").font(.caption).foregroundStyle(.secondary)
             }
             .explainer(Explain.cpu(chip: snapshot.chip, value: snapshot.cpuTemperature))
             Spacer()
@@ -126,6 +134,15 @@ struct Dashboard: View {
                 Text("Hottest core").font(.caption).foregroundStyle(.secondary)
             }
             .explainer(Explain.peak)
+        }
+    }
+
+    private func statusColor(_ status: HeatStatus) -> Color {
+        switch status {
+        case .ok: return .green
+        case .warm, .hot, .warning: return .orange
+        case .critical: return .red
+        case .unavailable: return .secondary
         }
     }
 

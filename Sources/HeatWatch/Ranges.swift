@@ -57,9 +57,9 @@ struct HeatScale {
 
     static let cpu = HeatScale(20, 105, unit: " °C",
                                source: "Rough ranges from common Apple silicon readings. Not Apple limits.", [
-        ("Idle", 50, "Reading, light browsing, idle", .low),
-        ("Busy", 80, "Video calls, many tabs, builds", .mid),
-        ("Heavy", 105, "Games, exports, long compiles", .high)
+        ("OK", HeatStatus.warmThreshold, "Reading, light browsing, idle", .low),
+        ("Warm", HeatStatus.hotThreshold, "Video calls, many tabs, builds", .mid),
+        ("Hot", 105, "Games, exports, long compiles", .high)
     ])
 
     static let gpu = HeatScale(20, 100, unit: " °C",

@@ -1,7 +1,8 @@
 #!/bin/sh
 set -eu
 cd "$(dirname "$0")"
-swift build -c release -Xcc -Wall -Xcc -Wextra -Xcc -Werror -Xswiftc -warnings-as-errors
+swift build -c release -Xcc -Wall -Xcc -Wextra -Xcc -Werror \
+    -Xswiftc -warnings-as-errors -Xswiftc -strict-concurrency=complete
 bin_dir=$(swift build -c release --show-bin-path)
 app_dir="$PWD/.build/HeatWatch.app"
 rm -rf "$app_dir"
